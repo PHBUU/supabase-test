@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ทดสอบล็อกอิน Supabase</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#f5f6f8;--card:#fff;--ink:#1f2937;--mute:#6b7280;--line:#e5e7eb;--brand:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans Thai',system-ui,sans-serif;line-height:1.6}
+  main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--mute);margin:0 0 20px;font-size:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+  .card h2{font-size:16px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+  .num{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#eef2ff;color:var(--brand);font-size:13px;font-weight:600}
+  button{font:inherit;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;background:var(--brand);color:#fff;font-weight:500}
+  button.sec{background:#f3f4f6;color:var(--ink)}
+  button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .who{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+  .who img{width:48px;height:48px;border-radius:50%;background:#e5e7eb}
+  .tag{display:inline-block;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:500}
+  .tag.ok{background:#dcfce7;color:var(--ok)} .tag.bad{background:#fee2e2;color:var(--bad)} .tag.warn{background:#fef3c7;color:var(--warn)}
+  .log{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;white-space:pre-wrap;max-height:260px;overflow:auto;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:10px}
+  td,th{border-bottom:1px solid var(--line);padding:6px 4px;text-align:left}
+  .hide{display:none}
+  .cfg{background:#fef3c7;border-color:#fde68a}
+</style>
+</head>
+<body>
+<main>
+  <h1>ทดสอบล็อกอิน Supabase</h1>
+  <p class="sub">ใช้ตรวจว่าบัญชี @go.buu.ac.th ล็อกอินได้ และอ่าน/เขียนฐานข้อมูลได้เร็วแค่ไหน</p>
+
+  <div id="cfgWarn" class="card cfg hide">
+    ⚠️ ยังไม่ได้ใส่ <b>SUPABASE_URL</b> และ <b>SUPABASE_KEY</b> ในไฟล์นี้ (ส่วน CONFIG ด้านล่างของไฟล์)
+  </div>
+
+  <div class="card">
+    <h2><span class="num">1</span>ล็อกอิน</h2>
+    <div id="signedOut">
+      <button id="btnLogin">เข้าสู่ระบบด้วย Google</button>
+    </div>
+    <div id="signedIn" class="hide">
+      <div class="who">
+        <img id="avatar" alt="">
+        <div>
+          <div id="name" style="font-weight:600"></div>
+          <div id="email" style="color:var(--mute);font-size:14px"></div>
+          <div id="domainTag" style="margin-top:4px"></div>
+        </div>
+      </div>
+      <button class="sec" id="btnLogout">ออกจากระบบ</button>
+    </div>
+  </div>
+
+  <div class="card" id="dbCard">
+    <h2><span class="num">2</span>ทดสอบฐานข้อมูล</h2>
+    <div class="row">
+      <button id="btnWrite" disabled>บันทึก 1 แถว</button>
+      <button id="btnBurst" class="sec" disabled>ส่งพร้อมกัน 20 ครั้ง</button>
+      <button id="btnRead" class="sec" disabled>อ่าน 10 แถวล่าสุด</button>
+    </div>
+    <div id="rows"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">3</span>บันทึกผล</h2>
+    <div class="log" id="log">พร้อมทดสอบ…</div>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* ===================== CONFIG — แก้ 2 บรรทัดนี้ ===================== */
+const SUPABASE_URL = 'https://rhpmlglhrxhqxpfyvtsl.supabase.co/rest/v1/';   // Project Settings → API → Project URL
+const SUPABASE_KEY = 'sb_publishable_pafHExmzxTu-udZ6Ii0s4w_dQ5Ry_4Q';      // Project Settings → API Keys → anon public (หรือ publishable)
+const ALLOWED_DOMAIN = 'go.buu.ac.th';
+/* ================================================================== */
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+function log(msg, kind) {
+  const t = new Date().toLocaleTimeString('th-TH');
+  const icon = kind === 'ok' ? '✅' : kind === 'bad' ? '❌' : kind === 'warn' ? '⚠️' : '•';
+  logEl.textContent = (logEl.textContent === 'พร้อมทดสอบ…' ? '' : logEl.textContent + '\n') + `[${t}] ${icon} ${msg}`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const ms = t0 => Math.round(performance.now() - t0) + ' ms';
+
+if (SUPABASE_URL.includes('xxxxxxxx') || SUPABASE_KEY.startsWith('ใส่')) {
+  $('cfgWarn').classList.remove('hide');
+  $('btnLogin').disabled = true;
+  throw new Error('config missing');
+}
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const backUrl = location.origin + location.pathname;
+
+// ---------- 1. Login ----------
+$('btnLogin').onclick = async () => {
+  log('กำลังไปหน้าล็อกอิน Google…');
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: backUrl,
+      queryParams: { hd: ALLOWED_DOMAIN, prompt: 'select_account' }
+    }
+  });
+  if (error) log('เปิดหน้าล็อกอินไม่ได้: ' + error.message, 'bad');
+};
+
+$('btnLogout').onclick = async () => {
+  await sb.auth.signOut();
+  log('ออกจากระบบแล้ว');
+};
+
+// ข้อผิดพลาดที่ Google/Supabase ส่งกลับมาทาง URL
+(() => {
+  const p = new URLSearchParams(location.search + '&' + location.hash.slice(1));
+  if (p.get('error')) {
+    log(`ล็อกอินไม่สำเร็จ: ${p.get('error')} — ${p.get('error_description') || ''}`, 'bad');
+  }
+})();
+
+function render(session) {
+  const u = session && session.user;
+  $('signedOut').classList.toggle('hide', !!u);
+  $('signedIn').classList.toggle('hide', !u);
+  ['btnWrite', 'btnBurst', 'btnRead'].forEach(id => $(id).disabled = !u);
+  if (!u) return;
+  const m = u.user_metadata || {};
+  $('avatar').src = m.avatar_url || m.picture || '';
+  $('name').textContent = m.full_name || m.name || '(ไม่มีชื่อ)';
+  $('email').textContent = u.email;
+  const okDomain = (u.email || '').toLowerCase().endsWith('@' + ALLOWED_DOMAIN);
+  $('domainTag').innerHTML = okDomain
+    ? '<span class="tag ok">อีเมลมหาวิทยาลัย ✓</span>'
+    : '<span class="tag bad">ไม่ใช่อีเมล @' + ALLOWED_DOMAIN + '</span>';
+}
+
+let firstEvent = true;
+sb.auth.onAuthStateChange((event, session) => {
+  render(session);
+  if (event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)) {
+    if (firstEvent) log('ล็อกอินสำเร็จ: ' + session.user.email, 'ok');
+    // ล้าง token ออกจาก URL ให้สะอาด
+    if (location.hash || location.search) history.replaceState(null, '', backUrl);
+  }
+  if (event === 'INITIAL_SESSION' && !session) log('ยังไม่ได้ล็อกอิน');
+  firstEvent = false;
+});
+
+// ---------- 2. Database ----------
+async function insertOne(tag) {
+  return sb.from('login_test').insert({ user_agent: tag + ' | ' + navigator.userAgent.slice(0, 120) });
+}
+
+$('btnWrite').onclick = async () => {
+  const t0 = performance.now();
+  const { error } = await insertOne('single');
+  if (error) log('บันทึกไม่ได้: ' + error.message + explain(error), 'bad');
+  else log('บันทึก 1 แถวสำเร็จ (' + ms(t0) + ')', 'ok');
+};
+
+$('btnBurst').onclick = async () => {
+  $('btnBurst').disabled = true;
+  log('ส่งพร้อมกัน 20 ครั้ง…');
+  const t0 = performance.now();
+  const res = await Promise.all(Array.from({ length: 20 }, (_, i) => {
+    const s = performance.now();
+    return insertOne('burst-' + (i + 1)).then(r => ({ err: r.error, t: performance.now() - s }));
+  }));
+  const fail = res.filter(r => r.err);
+  const times = res.map(r => r.t).sort((a, b) => a - b);
+  log(`เสร็จ ${20 - fail.length}/20 ครั้ง · รวม ${ms(t0)} · เร็วสุด ${Math.round(times[0])} ms · ช้าสุด ${Math.round(times[19])} ms`,
+      fail.length ? 'warn' : 'ok');
+  if (fail.length) log('ตัวอย่างข้อผิดพลาด: ' + fail[0].err.message + explain(fail[0].err), 'bad');
+  $('btnBurst').disabled = false;
+};
+
+$('btnRead').onclick = async () => {
+  const t0 = performance.now();
+  const { data, error } = await sb.from('login_test')
+    .select('id,email,created_at').order('id', { ascending: false }).limit(10);
+  if (error) { log('อ่านไม่ได้: ' + error.message + explain(error), 'bad'); return; }
+  log(`อ่าน ${data.length} แถว (${ms(t0)})`, 'ok');
+  $('rows').innerHTML = data.length
+    ? '<table><tr><th>#</th><th>อีเมล</th><th>เวลา</th></tr>' + data.map(r =>
+        `<tr><td>${r.id}</td><td>${r.email}</td><td>${new Date(r.created_at).toLocaleString('th-TH')}</td></tr>`).join('') + '</table>'
+    : '<p style="color:var(--mute)">ยังไม่มีข้อมูล</p>';
+};
+
+function explain(e) {
+  const m = (e.message || '') + ' ' + (e.code || '');
+  if (/row-level security|42501/i.test(m)) return '\n   → ถูกกฎ RLS บล็อก (ปกติถ้าไม่ใช่อีเมล @' + ALLOWED_DOMAIN + ')';
+  if (/does not exist|42P01|PGRST205/i.test(m)) return '\n   → ยังไม่ได้สร้างตาราง login_test (รัน SQL ในขั้นตอนที่ 3)';
+  if (/JWT|401/i.test(m)) return '\n   → session หมดอายุ ลองออกแล้วล็อกอินใหม่';
+  return '';
+}
+</script>
+</body>
+</html>
