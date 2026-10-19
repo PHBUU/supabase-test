@@ -97,20 +97,45 @@ if (SUPABASE_URL.includes('xxxxxxxx') || SUPABASE_KEY.startsWith('ใส่')) {
   throw new Error('config missing');
 }
 
+// ---------- 0. Diagnostics (รันก่อนสร้าง client เพื่อเห็น URL ที่ถูกส่งกลับมา) ----------
+(() => {
+  const raw = location.search + location.hash;
+  if (/access_token=/.test(raw)) log('กลับมาจาก Google พร้อม access_token ✓', 'ok');
+  else if (/[?&]code=/.test(raw)) log('กลับมาจาก Google พร้อม code ✓', 'ok');
+  if (raw) log('URL ที่ได้กลับมา: ' + location.href.replace(/(access_token|refresh_token|code|provider_token)=[^&]+/g, '$1=…'));
+  log('หน้านี้: ' + location.origin + location.pathname);
+})();
+
+window.addEventListener('error', e => log('JS error: ' + e.message, 'bad'));
+window.addEventListener('unhandledrejection', e => log('Promise error: ' + (e.reason && e.reason.message || e.reason), 'bad'));
+
+// เช็กว่าเปิด Google provider ใน Supabase แล้วหรือยัง
+fetch(SUPABASE_URL + '/auth/v1/settings', { headers: { apikey: SUPABASE_KEY } })
+  .then(r => r.json().then(j => ({ ok: r.ok, j })))
+  .then(({ ok, j }) => {
+    if (!ok) { log('เรียก Supabase ไม่ได้: ' + (j.message || j.msg || JSON.stringify(j)) + ' → ตรวจ SUPABASE_URL / SUPABASE_KEY', 'bad'); return; }
+    if (j.external && j.external.google) log('Supabase: เปิด Google provider แล้ว ✓', 'ok');
+    else log('Supabase: ยังไม่ได้เปิด Google provider → Authentication › Sign In / Providers › Google › Enable + Save', 'bad');
+  })
+  .catch(e => log('ติดต่อ Supabase ไม่ได้: ' + e.message, 'bad'));
+
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const backUrl = location.origin + location.pathname;
 
 // ---------- 1. Login ----------
 $('btnLogin').onclick = async () => {
   log('กำลังไปหน้าล็อกอิน Google…');
-  const { error } = await sb.auth.signInWithOAuth({
+  const { data, error } = await sb.auth.signInWithOAuth({
     provider: 'google',
     options: {
       redirectTo: backUrl,
+      skipBrowserRedirect: true,
       queryParams: { hd: ALLOWED_DOMAIN, prompt: 'select_account' }
     }
   });
-  if (error) log('เปิดหน้าล็อกอินไม่ได้: ' + error.message, 'bad');
+  if (error) { log('เปิดหน้าล็อกอินไม่ได้: ' + error.message, 'bad'); return; }
+  try { sessionStorage.setItem('loginClicked', Date.now()); } catch (e) {}
+  location.assign(data.url);
 };
 
 $('btnLogout').onclick = async () => {
@@ -150,7 +175,14 @@ sb.auth.onAuthStateChange((event, session) => {
     // ล้าง token ออกจาก URL ให้สะอาด
     if (location.hash || location.search) history.replaceState(null, '', backUrl);
   }
-  if (event === 'INITIAL_SESSION' && !session) log('ยังไม่ได้ล็อกอิน');
+  if (event === 'INITIAL_SESSION' && !session) {
+    let clicked = null;
+    try { clicked = sessionStorage.getItem('loginClicked'); sessionStorage.removeItem('loginClicked'); } catch (e) {}
+    if (clicked && Date.now() - clicked < 5 * 60000) {
+      log('กลับมาจาก Google แล้ว แต่ไม่ได้ session', 'bad');
+      log('   → ถ้า URL ข้างบนไม่มี access_token/code: Supabase ไม่ยอมส่งกลับมาหน้านี้\n     ตรวจ Authentication › URL Configuration ว่า Site URL และ Redirect URLs ตรงกับ "หน้านี้" ข้างบน', 'warn');
+    } else log('ยังไม่ได้ล็อกอิน');
+  }
   firstEvent = false;
 });
 
